@@ -17,7 +17,6 @@
  *      5 - Main function
  */
 
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -26,7 +25,7 @@
 #include <unistd.h> //contais the UNIX's syscall interface
 #include <sys/syscall.h> //contains syscall's numbers
 #include <fcntl.h> //flags used in 'open' syscall
-
+#include <dirent.h> //contains 'dirent' syscall constants
 
 // ==========================================================
 // =============== CMD_LINE_T OBJECT FEATURES ===============
@@ -156,12 +155,44 @@ void destroy_cmd_line(cmd_line_t* cmd_line)
 // ====================================================
 
 /**
+ * @brief Change each string's char to lower case
+ * @param str   Pointer to the working string
+ */
+void string_to_lower(char *str)
+{
+    assert(str != NULL);
+
+    for(int i = 0; i < strlen(str); i++)
+        str[i] = tolower(str[i]);
+}
+
+/**
+ * @brief Check if the string has only blank {' ', '\t', '\n'} chars
+ * @param str   Pointer to the string in analysis.
+ * @return 1 (true) if the string has only blank {' ', '\t', '\n'} chars. Otherwise, returns 0 (false).
+ *         Note: returns 1 (true) for len=0 strings.
+ */
+int blank_string(char *str)
+{
+    assert(str != NULL);
+
+    for(int i = 0; i < strlen(str); i++)
+    {
+        if(str[i] != ' ' && str[i] != '\t' && str[i] != '\n')
+            return 0;
+    }
+    return 1;
+}
+
+/**
  * @brief Rrompt the terminal to reading a line of the tty. Return the first remaining token in stdin.
  * @param str    Pointer to the string buffer where the text will be stored.
  * @return 1 (true) if the obtained token is the last of the line in stdin. Otherwise, returns 0 (false).
  */
 int read_token(char *str)
 {
+    assert(str != NULL);
+
     char c[2];
     c[0] = getchar(); //get the first char
     c[1] = '\0'; //end of string
@@ -174,7 +205,6 @@ int read_token(char *str)
 
     while (c[0] != '\n' && c[0] != ' ' && c[0] != '\t') //the token ends with '\n' or space or tab
     {
-        c[0] = tolower(c[0]); //Change char to lower
         strcat(str,c); //append the last obtained char to string
         token_len += 1; //increment the token lenght
         c[0] = getchar(); //read the next char in stdin
@@ -197,7 +227,14 @@ void read_args(cmd_line_t* cmd_line, size_t argi)
 
     //read the next token
     char str[MAX_TOKEN_LEN] = "";
-    int end_of_line = read_token(str);
+
+    int end_of_line, is_blank;
+
+    do
+    {
+        end_of_line = read_token(str);
+        is_blank = blank_string(str);
+    }while (is_blank && !end_of_line);
 
     if(!end_of_line) //if stdin is not empty
     {
@@ -205,8 +242,11 @@ void read_args(cmd_line_t* cmd_line, size_t argi)
     }
     else //exit condition
     {
-        if(argi >= 0)
+        if(is_blank && argi > 0)
+            init_cmd_line_args(cmd_line, argi);
+        else if(!is_blank && argi >= 0)
             init_cmd_line_args(cmd_line, argi+1);
+        else return;
     }
 
     if(argi >= 0)
@@ -224,6 +264,8 @@ void read_cmd_line(cmd_line_t *cmd_line)
     //read command
     char command[MAX_TOKEN_LEN] = "";
     int end_of_line = read_token(command);
+
+    string_to_lower(command);
 
     set_cmd_line_command(cmd_line, command);
 
@@ -292,7 +334,7 @@ typedef struct
  */
 alphabetical_tree_node_t *create_alphabetical_tree_node()
 {
-    alphabetical_tree_node_t *node = malloc(sizeof(alphabetical_tree_node_t));
+    alphabetical_tree_node_t *node = (alphabetical_tree_node_t*)malloc(sizeof(alphabetical_tree_node_t));
     assert(node != NULL);
 
     node->cmd_callback = NULL;
@@ -310,7 +352,7 @@ alphabetical_tree_node_t *create_alphabetical_tree_node()
  */
 alphabetical_tree_header_t *create_alphabetical_tree()
 {
-    alphabetical_tree_header_t *h = malloc(sizeof (alphabetical_tree_header_t));
+    alphabetical_tree_header_t *h = (alphabetical_tree_header_t*)malloc(sizeof (alphabetical_tree_header_t));
     assert(h != NULL);
 
     for(int i = 0; i < ALPHABETICAL_TREE_ENTRIES; i++)
@@ -454,10 +496,9 @@ void pwd_command(cmd_line_t *cmd_line)
         char wd_name[MAX_TOKEN_LEN];
         syscall(SYS_getcwd, wd_name, MAX_TOKEN_LEN);
 
-        printf("%s\n", wd_name);
+        printf("%s\n", wd_name); //linux syscall 'getcwd' to get the current working dir name
     }
 }
-
 
 /**
  * @brief Treatment function of the CD command.
@@ -472,10 +513,12 @@ void cd_command(cmd_line_t *cmd_line)
     }
     else
     {
-        syscall(SYS_chdir, cmd_line->args[0]);
+        int retval = syscall(SYS_chdir, cmd_line->args[0]); //linux syscall 'chdir' to change the current working dir name
+
+        if(retval == -1) //error flag
+            printf("ERROR: Cannot change the working directory path for that\n");
     }
 }
-
 
 /**
  * @brief Treatment function of the EXIT command.
@@ -490,7 +533,7 @@ void exit_command(cmd_line_t *cmd_line)
     }
     else
     {
-        syscall(SYS_exit, EXIT_SUCCESS);
+        syscall(SYS_exit, EXIT_SUCCESS); //linux syscall 'exit' to close the program
     }
 }
 
@@ -510,6 +553,52 @@ typedef struct linux_dirent {
 
 #define DENTS_BUFFER_SIZE 1024*1024*5
 
+/**
+ * @brief Print name and type of each entrie in the dirents buffer.
+ *        This function is used by the LS command.
+ *
+ * @param buffer        Pointer to the dirents buffer
+ * @param n_entries     Number of dirents in the buffer
+ */
+void print_entries(void *buffer, size_t n_entries)
+{
+    linux_dirent_t *entrie = (linux_dirent_t*)buffer; //first entrie
+
+    for (size_t addr_offset = 0; addr_offset < n_entries; addr_offset += entrie->d_reclen)
+    {
+        entrie = (struct linux_dirent *) (buffer + addr_offset); //get current entrie
+
+        //the last byte of the entrie is its type flag
+        char entrie_type = *(char*)((unsigned long)entrie + entrie->d_reclen - 1);
+
+        if(strcmp(entrie->d_name,"..") && strcmp(entrie->d_name,".")) //ignore '..' and '.' dir entries
+        {
+            switch (entrie_type) //print small entrie's type
+            {
+                case DT_DIR: printf("[DIR]"); break; //directory entrie
+                case DT_REG: printf("[FILE]"); break; //file entrie
+                case DT_LNK: printf("[LINK]"); break; //link entrie
+                case DT_SOCK:
+                case DT_CHR:
+                case DT_BLK:
+                case DT_FIFO: printf("[SYS]"); break; //system entrie (devices, sockets and pipes)
+                default: printf("[UNK]"); //unknow entrie type
+            }
+
+            printf("\t%s\t\t",entrie->d_name); //print entrie's name
+
+            switch (entrie_type) //print system entrie's type description
+            {
+                case DT_SOCK: printf("(network socket)"); break;
+                case DT_CHR: printf("(char device)"); break;
+                case DT_BLK: printf("(block device)"); break;
+                case DT_FIFO: printf("(pipe)"); break;
+            }
+
+            printf("\n"); //break line
+        }
+    }
+}
 
 /**
  * @brief Treatment function of the LS command.
@@ -518,6 +607,8 @@ typedef struct linux_dirent {
 void ls_command(cmd_line_t *cmd_line)
 {
     char dir_name[MAX_TOKEN_LEN]; //buffer to working dir name
+
+    // STEP 1 - GET THE PATH OF THE DIRECTORY THAT WILL BE LOAD
 
     if(cmd_line->nargs > 1)
     {
@@ -528,7 +619,9 @@ void ls_command(cmd_line_t *cmd_line)
     else if(cmd_line->nargs == 1)
         strcpy(dir_name, cmd_line->args[0]);
     else
-        syscall(SYS_getcwd, dir_name, MAX_TOKEN_LEN); //linux syscall getcwd to get the current working dir name
+        syscall(SYS_getcwd, dir_name, MAX_TOKEN_LEN); //linux syscall 'getcwd' to get the current working dir name
+
+    // STEP 2 - LOAD THE DIRECTORY AS A DESCRIPTOR
 
     int fd = open(dir_name, O_RDONLY | O_DIRECTORY); //open the working dir as a file descriptor
 
@@ -538,12 +631,14 @@ void ls_command(cmd_line_t *cmd_line)
         return;
     }
 
+    // STEP 3 - GET DIRECTORY ENTRIES FROM THE DESCRIPTOR AND PRINT ITS INFORMATIONS
+
     void *buffer = malloc(DENTS_BUFFER_SIZE); //buffer to dir entries
 
-    for( int n_read = syscall(SYS_getdents, fd, buffer, DENTS_BUFFER_SIZE); //syscall getdents to get dir entries
-         n_read != 0; //repeat the syscall as long as there are unread entries
-         n_read = syscall(SYS_getdents, fd, buffer, DENTS_BUFFER_SIZE)
-       )
+    long n_read = syscall(SYS_getdents, fd, buffer, DENTS_BUFFER_SIZE); //getdents syscall to get dir entries
+
+    //the 'getdents' syscall must be repeated as long as there are unread entries in the descriptor.
+    while(n_read != 0) //do it while the 'getdents' syscall gets most than zero entries
     {
         if(n_read == -1) //n_read equal to -1 is an error flag
         {
@@ -551,15 +646,45 @@ void ls_command(cmd_line_t *cmd_line)
             return;
         }
 
-        linux_dirent_t *entrie = (linux_dirent_t*)buffer; //first entrie
-        for (size_t addr_offset = 0; addr_offset < n_read; addr_offset += entrie->d_reclen)
-        {
-            entrie = (struct linux_dirent *) (buffer + addr_offset); //get current entrie
+        print_entries(buffer, n_read); //print entries informations
 
-            if(strcmp(entrie->d_name,"..") && strcmp(entrie->d_name,"."))
-                printf("%s\n",entrie->d_name); //print entrie's name
-        }
+        //repeat 'getdents' syscall to get remaining dir entries
+        n_read = syscall(SYS_getdents, fd, buffer, DENTS_BUFFER_SIZE);
     }
+}
+
+/**
+ * @brief Treatment function of the HELP command.
+ * @param cmd_line  Pointer to the cmd_line_t struct buffer with the command token and its arguments.
+ */
+void help_command(cmd_line_t *cmd_line)
+{
+    if(cmd_line->nargs != 0)
+        printf("WARNING: The \'help\' command has no arguments\n\n");
+
+    printf("Command line syntax:\n"
+           "* No arguments:\t\t[command]\n"
+           "* Single argument:\t[command] [arg]\n"
+           "* N arguments:\t\t[command] [arg_0] [arg_1] ... [arg_{N-1}]\n"
+           "\n"
+           "Commands:\n"
+           "* HELP\n"
+           "\tArguments: no arguments.\n"
+           "\tDescription: Print informations about this shell.\n"
+           "* PWD\n"
+           "\tArguments: no arguments.\n"
+           "\tDescription: Print current working directory path.\n"
+           "* CD\n"
+           "\tArguments: path.\n"
+           "\tDescription: Change working directory path. \n"
+           "* EXIT\n"
+           "\tArguments: no arguments.\n"
+           "\tDescription: Close the shell.\n"
+           "* LS\n"
+           "\tArguments: path (optional).\n"
+           "\tDescription: Lists entries in the directory (argument directory or working directory).\n"
+           "\n"
+          );
 }
 
 // =============================================
@@ -568,8 +693,11 @@ void ls_command(cmd_line_t *cmd_line)
 
 int main()
 {
-    printf("Small Linux Shell. By Filipe Chagas.\n"
-           "Available commands: pwd, cd, exit, ls.\n");
+    printf("Small Linux Shell\n"
+           "By Filipe Chagas\n"
+           "\t( filipe.ferraz0@gmail.com )\n"
+           "\t( github.com/filipechagasdev )\n"
+           "Available commands: help, pwd, cd, exit, ls.\n\n");
 
     //Building the dictionary of commands
     alphabetical_tree_header_t *dictionary = create_alphabetical_tree();
@@ -577,6 +705,7 @@ int main()
     insert_token_in_tree(dictionary, "cd", cd_command);
     insert_token_in_tree(dictionary, "exit", exit_command);
     insert_token_in_tree(dictionary, "ls", ls_command);
+    insert_token_in_tree(dictionary, "help", help_command);
 
     //Runtime loop
     cmd_line_t *cmd_line;
@@ -584,7 +713,7 @@ int main()
     {
         cmd_line = create_cmd_line(); //new command line buffer
 
-        printf(">>>");
+        printf(">>> ");
 
         read_cmd_line(cmd_line); //read command line
 

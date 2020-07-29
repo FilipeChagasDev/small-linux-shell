@@ -70,6 +70,8 @@ It's very very simple. Just use the following command:
 gcc main.c -o smallshell
 ```
 
+Or use '**build_run.sh**' script:
+
 I developed this using GCC version 9.3.0.
 
 

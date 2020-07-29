@@ -299,7 +299,7 @@ void print_cmd_line(cmd_line_t *cmd_line)
 // =============== PARSING FEATURES ===============
 // ================================================
 
-#define ALPHABETICAL_TREE_ENTRIES 27 //Number of output edges for each vertex in the alphabetical tree
+#define ALPHABETICAL_TREE_ENTRIES 26 //Number of output edges for each vertex in the alphabetical tree
 
 /**
  * @brief Node struct of the alphabetical tree.
@@ -310,12 +310,14 @@ void print_cmd_line(cmd_line_t *cmd_line)
  *        This tree algorithm will be used here as a command dictionary.
  *
  * @param cmd_callback  callback to the function that perform the command (NULL if the command does not exists)
+ * @param text          Content text for variables (NULL if the variable does not exists)
  * @param next          Edges for the next tree level.
  */
 typedef struct alphabetical_tree_node
 {
     //callback to the function that perform the command (NULL if the command does not exists)
     void (*cmd_callback)(cmd_line_t*);
+    char *text;
 
     struct alphabetical_tree_node *next[ALPHABETICAL_TREE_ENTRIES];
 } alphabetical_tree_node_t;
@@ -328,6 +330,22 @@ typedef struct
 {
     alphabetical_tree_node_t *entries[ALPHABETICAL_TREE_ENTRIES];
 } alphabetical_tree_header_t;
+
+/**
+ * @brief Check if the string is compatible with the alphabetical tree
+ * @param str   String in analysis
+ * @return 1 (true) if str is compatible with the alphabetical tree. Otherwise, returns 0 (false).
+ */
+int alphabetical_string(char *str)
+{
+    for(int i = 0; i < strlen(str); i++) //checks for prohibited chars in the command token
+    {
+        if(str[i]-'a' >= ALPHABETICAL_TREE_ENTRIES || str[i]-'a' < 0 ) //non-alphabetic char
+           return 0;
+    }
+
+    return 1;
+}
 
 /**
  * @brief Creates an empty alphabetical tree node structure.
@@ -370,6 +388,7 @@ void destroy_alphabetical_subtree(alphabetical_tree_node_t *node)
         for(int i = 0; i < ALPHABETICAL_TREE_ENTRIES; i++)
             destroy_alphabetical_subtree(node->next[i]);
 
+        if(node->text != NULL) free(node->text);
         free(node);
     }
 }
@@ -388,15 +407,15 @@ void destroy_alphabetical_tree(alphabetical_tree_header_t *h)
  * @brief Add a token to the alphabetical tree.
  * @param h      Pointer to the header of the tree.
  * @param token  Token that will be added to the tree.
+ * @param text   Text content of the token node
  */
-void insert_token_in_tree(alphabetical_tree_header_t *h, char *token, void (*callback)(cmd_line_t*))
+void insert_token_in_tree(alphabetical_tree_header_t *h, char *token, void (*callback)(cmd_line_t*), char* text)
 {
     assert(h != NULL);
     assert(token != NULL);
 
     size_t token_len = strlen(token);
     assert(token_len > 0);
-    assert(callback != NULL);
 
     char first_char = token[0];
     int j = first_char - 'a';
@@ -422,6 +441,13 @@ void insert_token_in_tree(alphabetical_tree_header_t *h, char *token, void (*cal
         }
 
         iterator->cmd_callback = callback;
+
+        if(text != NULL)
+        {
+            //Copy text for the node
+            iterator->text = (char*)calloc(strlen(text), sizeof(char));
+            strcpy(iterator->text, text);
+        }
     }
 }
 
@@ -441,6 +467,8 @@ alphabetical_tree_node_t *find_token_in_tree(alphabetical_tree_header_t *h, char
 
     int j = token[0] - 'a'; //Index of the entrie for the first node
 
+    assert(j < 27);
+
     if(token_len == 1) //if token has only one char
     {
         return h->entries[j]; //Return a node of the first tree's level
@@ -454,6 +482,8 @@ alphabetical_tree_node_t *find_token_in_tree(alphabetical_tree_header_t *h, char
             if(iterator == NULL) return NULL; //If the current node is NULL, then there is no path to the token.
 
             j = token[i] - 'a'; //Index of the edge for the next node
+            assert(j < 27);
+
             iterator = iterator->next[j]; //Go to the next node
         }
         //The current node pointered by the iterator is the token's node.
@@ -471,6 +501,12 @@ void run_command(alphabetical_tree_header_t *h, cmd_line_t *cmd_line)
     assert(h != NULL);
     assert(cmd_line != NULL);
 
+    if(!alphabetical_string(cmd_line->command))
+    {
+        printf("ERROR: Commands do not have non-alphabetic characters\n");
+        return;
+    }
+
     alphabetical_tree_node_t *node = find_token_in_tree(h, cmd_line->command);
 
     if(node != NULL) node->cmd_callback(cmd_line);
@@ -480,6 +516,9 @@ void run_command(alphabetical_tree_header_t *h, cmd_line_t *cmd_line)
 // ================================================
 // =============== COMMAND FEATURES ===============
 // ================================================
+
+alphabetical_tree_header_t *dictionary = NULL; //command dictionary
+alphabetical_tree_header_t *variables = NULL; //variables
 
 /**
  * @brief Treatment function of the PWD command.
@@ -563,6 +602,8 @@ typedef struct linux_dirent {
  */
 void print_entries(void *buffer, size_t n_entries)
 {
+    assert(buffer != NULL);
+
     linux_dirent_t *entrie = (linux_dirent_t*)buffer; //first entrie
 
     for (size_t addr_offset = 0; addr_offset < n_entries; addr_offset += entrie->d_reclen)
@@ -607,6 +648,8 @@ void print_entries(void *buffer, size_t n_entries)
  */
 void ls_command(cmd_line_t *cmd_line)
 {
+    assert(cmd_line != NULL);
+
     char dir_name[MAX_TOKEN_LEN]; //buffer to working dir name
 
     // STEP 1 - GET THE PATH OF THE DIRECTORY THAT WILL BE LOAD
@@ -660,6 +703,8 @@ void ls_command(cmd_line_t *cmd_line)
  */
 void exec_command(cmd_line_t *cmd_line)
 {
+    assert(cmd_line != NULL);
+
     if(cmd_line->nargs < 1)
     {
         printf("ERROR: The ls command has at least 1 argument\n");
@@ -693,11 +738,181 @@ void exec_command(cmd_line_t *cmd_line)
 }
 
 /**
+ * @brief Treatment function of the SET command.
+ * @param cmd_line  Pointer to the cmd_line_t struct buffer with the command token and its arguments.
+ */
+void set_command(cmd_line_t *cmd_line)
+{
+    assert(cmd_line != NULL);
+    assert(variables != NULL);
+
+    if(cmd_line->nargs != 3)
+    {
+        printf("ERROR: The set command has 3 arguments\n");
+        print_cmd_line(cmd_line);
+        return;
+    }
+
+    char *dest_var = cmd_line->args[0]; //destination variable name
+    char *text = NULL; //text that will be stored in the variable
+
+    if(!alphabetical_string(dest_var))
+    {
+        printf("ERROR: Variable's names must have only alphabetical chars\n");
+        return;
+    }
+
+    if(!strcmp(cmd_line->args[1], "as")) // variable <- text
+    {
+        text = cmd_line->args[2];
+    }
+    else if(!strcmp(cmd_line->args[1], "like")) // variable <- variable
+    {
+        char *origin_var = cmd_line->args[2];
+
+        if(!alphabetical_string(origin_var))
+        {
+            printf("ERROR: Variable's names must have only alphabetical chars\n");
+            return;
+        }
+
+        alphabetical_tree_node_t *n = find_token_in_tree(variables, origin_var);
+        text = n->text;
+    }
+    else
+    {
+        printf("ERROR: Missing \'as\' or \'like\' (lowercase) statement.\n"
+               "The syntax of \'store\' command is: set [var] as [text].\n"
+               "\tor: set [dest_var] like [origin_var]\n"
+               "Example: set dev_path as \\dev\n"
+               "Example: set dev_path_2 like dev_path\n"
+               );
+        return;
+    }
+
+    insert_token_in_tree(variables, dest_var, NULL, text);
+}
+
+/**
+ * @brief Treatment function of the PRINT command.
+ * @param cmd_line  Pointer to the cmd_line_t struct buffer with the command token and its arguments.
+ */
+void print_command(cmd_line_t *cmd_line)
+{
+    assert(cmd_line != NULL);
+
+    if(cmd_line->nargs < 1)
+    {
+        printf("ERROR: The print command has at least 1 argument\n");
+        print_cmd_line(cmd_line);
+        return;
+    }
+
+    for(int i = 0; i < cmd_line->nargs; i++)
+    {
+        if(cmd_line->args[i][0] == '$' && cmd_line->args[i][1] != '$') //arg is a variable name
+        {
+            char *var_name = &cmd_line->args[i][1];
+
+            if(!alphabetical_string(var_name))
+            {
+                printf("ERROR: Variable's names have only alphabetical chars\n");
+                return;
+            }
+
+            alphabetical_tree_node_t *n = find_token_in_tree(variables, var_name);
+
+            if(n == NULL)
+            {
+                printf("\nERROR: Variable \'%s\' not found\n", var_name);
+                return;
+            }
+
+            printf("%s ", n->text);
+        }
+        else if(cmd_line->args[i][0] == '$' && cmd_line->args[i][1] == '$') //arg begins with '$' but is not a variable name
+            printf("%s ", &cmd_line->args[i][1]);
+        else
+            printf("%s ", cmd_line->args[i]);
+    }
+    printf("\n");
+}
+
+/**
+ * @brief Treatment function of the UV command.
+ * @param cmd_line  Pointer to the cmd_line_t struct buffer with the command token and its arguments.
+ */
+void uv_command(cmd_line_t *cmd_line)
+{
+    assert(cmd_line != NULL);
+
+    if(cmd_line->nargs < 2)
+    {
+        printf("ERROR: The uv command has at least 2 arguments\n");
+        print_cmd_line(cmd_line);
+        return;
+    }
+
+    cmd_line_t *new_cmd_line = create_cmd_line();
+    set_cmd_line_command(new_cmd_line, cmd_line->args[0]);
+    init_cmd_line_args(new_cmd_line, cmd_line->nargs-1);
+
+    for(int i = 1; i < cmd_line->nargs; i++)
+    {
+        if(cmd_line->args[i][0] == '$' && cmd_line->args[i][1] != '$') //arg is a variable name
+        {
+            char *var_name = &cmd_line->args[i][1];
+
+            if(!alphabetical_string(var_name))
+            {
+                printf("ERROR: Variable's names have only alphabetical chars\n");
+                return;
+            }
+
+            alphabetical_tree_node_t *n = find_token_in_tree(variables, var_name);
+
+            if(n == NULL)
+            {
+                printf("\nERROR: Variable \'%s\' not found\n", var_name);
+                return;
+            }
+
+            set_cmd_line_arg(new_cmd_line, n->text, i-1);
+        }
+        else if(cmd_line->args[i][0] == '$' && cmd_line->args[i][1] == '$') //arg begins with '$' but is not a variable name
+            set_cmd_line_arg(new_cmd_line, &cmd_line->args[i][1], i-1);
+        else
+            set_cmd_line_arg(new_cmd_line, cmd_line->args[i], i-1);
+    }
+
+    run_command(dictionary, new_cmd_line);
+    destroy_cmd_line(new_cmd_line);
+
+}
+
+/**
+ * @brief Print text content for each node in the alphabetical subtree
+ * @param node  Pointer to the root of the alphabetical subtree
+ */
+void print_subtree_texts(alphabetical_tree_node_t *node)
+{
+    if(node != NULL)
+    {
+        if(node->text != NULL) printf("%s\n", node->text);
+
+        for(int i = 0; i < ALPHABETICAL_TREE_ENTRIES; i++)
+            print_subtree_texts(node->next[i]);
+    }
+}
+
+/**
  * @brief Treatment function of the HELP command.
  * @param cmd_line  Pointer to the cmd_line_t struct buffer with the command token and its arguments.
  */
 void help_command(cmd_line_t *cmd_line)
 {
+    assert(cmd_line != NULL);
+
     if(cmd_line->nargs != 0)
         printf("WARNING: The \'help\' command has no arguments\n\n");
 
@@ -706,27 +921,13 @@ void help_command(cmd_line_t *cmd_line)
            "* Single argument:\t[command] [arg]\n"
            "* N arguments:\t\t[command] [arg_0] [arg_1] ... [arg_{N-1}]\n"
            "\n"
-           "Commands:\n"
-           "* HELP\n"
-           "\tArguments: no arguments.\n"
-           "\tDescription: Print informations about this shell.\n"
-           "* PWD\n"
-           "\tArguments: no arguments.\n"
-           "\tDescription: Print current working directory path.\n"
-           "* CD\n"
-           "\tArguments: path.\n"
-           "\tDescription: Change working directory path. \n"
-           "* EXIT\n"
-           "\tArguments: no arguments.\n"
-           "\tDescription: Close the shell.\n"
-           "* LS\n"
-           "\tArguments: path (optional).\n"
-           "\tDescription: Lists entries in the directory (argument directory or working directory).\n"
-           "* EXEC\n"
-           "\tArguments: path, arg_0, arg_1, ..., arg_n.\n"
-           "\tDescription: Execute the *path* file.\n"
-           "\n"
-          );
+           "---- COMMANDS ----\n\n"
+           );
+
+    for(int i = 0; i < ALPHABETICAL_TREE_ENTRIES; i++)
+    {
+        print_subtree_texts(dictionary->entries[i]);
+    }
 }
 
 
@@ -741,16 +942,70 @@ int main()
            "By Filipe Chagas\n"
            "\t( filipe.ferraz0@gmail.com )\n"
            "\t( github.com/filipechagasdev )\n"
-           "Available commands: help, pwd, cd, exit, ls, exec \n\n");
+           "Type 'help' to see the list of commands\n\n");
+
+    //Building variables tree
+    variables = create_alphabetical_tree();
 
     //Building the dictionary of commands
-    alphabetical_tree_header_t *dictionary = create_alphabetical_tree();
-    insert_token_in_tree(dictionary, "pwd", pwd_command);
-    insert_token_in_tree(dictionary, "cd", cd_command);
-    insert_token_in_tree(dictionary, "exit", exit_command);
-    insert_token_in_tree(dictionary, "ls", ls_command);
-    insert_token_in_tree(dictionary, "exec", exec_command);
-    insert_token_in_tree(dictionary, "help", help_command);
+    dictionary = create_alphabetical_tree();
+
+    insert_token_in_tree(dictionary, "pwd", pwd_command,
+                         "* PWD (Print Working Directory)\n"
+                         "\tArguments: no arguments.\n"
+                         "\tDescription: Print current working directory path.\n"
+                         );
+
+    insert_token_in_tree(dictionary, "cd", cd_command,
+                         "* CD (Change Directory)\n"
+                         "\tArguments: path.\n"
+                         "\tDescription: Change working directory path. \n"
+                         );
+
+    insert_token_in_tree(dictionary, "exit", exit_command,
+                         "* EXIT\n"
+                         "\tArguments: no arguments.\n"
+                         "\tDescription: Close the shell.\n"
+                         );
+
+    insert_token_in_tree(dictionary, "ls", ls_command,
+                         "* LS (List)\n"
+                         "\tArguments: path (optional).\n"
+                         "\tDescription: Lists entries in the directory (argument directory or working directory).\n"
+                         );
+
+    insert_token_in_tree(dictionary, "exec", exec_command,
+                         "* EXEC (Execute) \n"
+                         "\tArguments: path, arg0, arg1, ..., argn.\n"
+                         "\tDescription: Execute the *path* file.\n"
+                         "\n"
+                         );
+
+    insert_token_in_tree(dictionary, "help", help_command,
+                         "* HELP\n"
+                         "\tArguments: no arguments.\n"
+                         "\tDescription: Print informations about this shell.\n"
+                         );
+
+    insert_token_in_tree(dictionary, "set", set_command,
+                         "* SET\n"
+                         "\tArguments: varname, as, text\n"
+                         "\t\t destvarname like originvarname\n"
+                         "\tDescription: With \'as\', set the text as variable's content.\n"
+                         "\t\t With \'like\', copy contents from the origin var to the destination var.\n"
+                         );
+
+    insert_token_in_tree(dictionary, "print", print_command,
+                         "* PRINT\n"
+                         "\tArguments: $varname or text, ... (n-times)\n"
+                         "\tDescription: Print contents of arguments.\n"
+                         );
+
+    insert_token_in_tree(dictionary, "uv", uv_command,
+                         "* UV (Using Variables)\n"
+                         "\tArguments: command, $varname or text, ... (n-times)\n"
+                         "\tDescription: Use any command with variables.\n"
+                         );
 
     //Runtime loop
     cmd_line_t *cmd_line;

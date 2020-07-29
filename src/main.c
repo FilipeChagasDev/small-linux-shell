@@ -26,6 +26,7 @@
 #include <sys/syscall.h> //contains syscall's numbers
 #include <fcntl.h> //flags used in 'open' syscall
 #include <dirent.h> //contains 'dirent' syscall constants
+#include <wait.h> //contains 'wait'
 
 // ==========================================================
 // =============== CMD_LINE_T OBJECT FEATURES ===============
@@ -654,6 +655,44 @@ void ls_command(cmd_line_t *cmd_line)
 }
 
 /**
+ * @brief Treatment function of the EXEC command.
+ * @param cmd_line  Pointer to the cmd_line_t struct buffer with the command token and its arguments.
+ */
+void exec_command(cmd_line_t *cmd_line)
+{
+    if(cmd_line->nargs < 1)
+    {
+        printf("ERROR: The ls command has at least 1 argument\n");
+        print_cmd_line(cmd_line);
+        return;
+    }
+
+    int my_pid = fork(); //fork the current process
+
+    if( my_pid == 0 ) //if this is the child process
+    {
+        //build the argv array
+        char **argv = (char**)calloc(cmd_line->nargs+1, sizeof(char*));
+
+        for( int i = 0; i < cmd_line->nargs; i++ )
+            argv[i] = cmd_line->args[i];
+
+        argv[cmd_line->nargs] = NULL; //argv must be NULL-terminated
+
+        //change the current process to 'args[0]'
+        int ret_val = execv(cmd_line->args[0], argv);
+
+        if(ret_val == -1) //error flag
+        {
+            printf("ERROR: Cannot execute \'%s\'\n", cmd_line->args[0]);
+            exit(0);
+        }
+    }
+
+    wait(2);
+}
+
+/**
  * @brief Treatment function of the HELP command.
  * @param cmd_line  Pointer to the cmd_line_t struct buffer with the command token and its arguments.
  */
@@ -683,9 +722,13 @@ void help_command(cmd_line_t *cmd_line)
            "* LS\n"
            "\tArguments: path (optional).\n"
            "\tDescription: Lists entries in the directory (argument directory or working directory).\n"
+           "* EXEC\n"
+           "\tArguments: path, arg_0, arg_1, ..., arg_n.\n"
+           "\tDescription: Execute the *path* file.\n"
            "\n"
           );
 }
+
 
 // =============================================
 // =============== MAIN FUNCTION ===============
@@ -693,11 +736,12 @@ void help_command(cmd_line_t *cmd_line)
 
 int main()
 {
+
     printf("Small Linux Shell\n"
            "By Filipe Chagas\n"
            "\t( filipe.ferraz0@gmail.com )\n"
            "\t( github.com/filipechagasdev )\n"
-           "Available commands: help, pwd, cd, exit, ls.\n\n");
+           "Available commands: help, pwd, cd, exit, ls, exec \n\n");
 
     //Building the dictionary of commands
     alphabetical_tree_header_t *dictionary = create_alphabetical_tree();
@@ -705,6 +749,7 @@ int main()
     insert_token_in_tree(dictionary, "cd", cd_command);
     insert_token_in_tree(dictionary, "exit", exit_command);
     insert_token_in_tree(dictionary, "ls", ls_command);
+    insert_token_in_tree(dictionary, "exec", exec_command);
     insert_token_in_tree(dictionary, "help", help_command);
 
     //Runtime loop

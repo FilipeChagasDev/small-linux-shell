@@ -11,12 +11,13 @@ A small Linux command interpreter implemented using the kernel syscall interface
 
 ## Available commands
 
-| Command | Arguments | Description |
-|---------|-----------|-------------|
-| help    |           | Print informations about the shell. |
-| pwd     |           | Print current working directory path. |
-| cd      | destination_path  | Change working directory path. |
-| ls      | path _(optional)_ | Lists entries in the directory (argument directory or working directory). |
-| exit    |           | Close the shell. |
+| Command | Arguments | Description | Usage Example |
+|---------|-----------|-------------|---------|
+| **help**    |           | Print informations about the shell. | help |
+| **pwd**     |           | Print current working directory path. | pwd |
+| **cd**      | destination_path  | Change working directory path. | cd /home |
+| **ls**      | path _(optional)_ | Lists entries in the directory (argument directory or working directory). | ls |
+| **exec** | path, \[arg\_1 , ... , arg\_n\] _(optional)_| Execute the _path_ file. | exec echo hello |
+| **exit**    |           | Close the shell. | exit |
 
 

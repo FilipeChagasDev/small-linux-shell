@@ -6,10 +6,10 @@ A small Linux command interpreter implemented using the kernel syscall interface
 
 
 ## Syntax 
-* No arguments:	[command]
-* Single argument:	[command] [arg]
-* Two arguments:	[command] [arg_0] [arg_1]
-* _N_ arguments:	[command] [arg_0] [arg_1] ... [arg_{N-1}]
+* No arguments:	\<command\>
+* Single argument:	\<command\> \<arg\>
+* Two arguments:	\<command\> \<arg_0\> \<arg_1\>
+* _N_ arguments:	\<command> \<arg_0\> \<arg_1\> ... \<arg_{N-1}\>
 
 ## Basic commands
 
@@ -64,10 +64,12 @@ hello_world hello_world hello_world
 
 ## Building
 
-It's very very simple. Just use the following command:
+It's very very simple. Just use the following commands:
 
 ```
-gcc main.c -o smallshell
+gcc src/tools/echo.c -o bin/shell
+gcc src/main.c -o bin/shell
+./bin/shell
 ```
 
 Or use '**build_run.sh**' script:

@@ -1,3 +1,4 @@
-gcc src/main.c -o smallshell
+gcc src/main.c -o bin/shell
+gcc src/echo.c -o bin/echo
 clear
-./smallshell
+./bin/shell
